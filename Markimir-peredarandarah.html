@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Markimir - Mari mikir sambil miring</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
+        
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f8fafc;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            touch-action: manipulation;
+        }
+        #main-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
+        }
+
+        #video-container {
+            position: relative;
+            transition: all 0.4s ease-in-out;
+            z-index: 50;
+            display: block;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .video-box-ui {
+            width: 140px;
+            height: 90px;
+            border-radius: 16px;
+            border: 4px solid #ef4444;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
+
+        .video-large {
+            width: 240px;
+            height: 180px;
+            border-radius: 24px;
+            border: 6px solid white;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
+
+        video {
+            transform: scaleX(-1);
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #000;
+        }
+
+        .screen {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+            z-index: 20;
+            background: inherit;
+        }
+        .active-screen { display: flex; }
+
+        .card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 28px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            text-align: center;
+            width: 100%;
+            max-width: 380px; /* Optimal untuk Mobile */
+            border: 2px solid #fecaca;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .btn-primary {
+            background: #ef4444;
+            color: white;
+            padding: 0.8rem 2rem;
+            border-radius: 99px;
+            font-weight: 800;
+            font-size: 1.1rem;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+            cursor: pointer;
+            width: 100%;
+        }
+        .btn-primary:hover { transform: scale(1.02); background: #dc2626; }
+        .btn-primary:disabled { background: #cbd5e1; box-shadow: none; cursor: not-allowed; }
+
+        .option-card {
+            flex: 1;
+            padding: 1rem;
+            background: white;
+            border-radius: 20px;
+            text-align: center;
+            font-weight: 800;
+            font-size: 0.9rem;
+            border: 3px solid transparent;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 70px;
+        }
+        .selected-left { background: #3b82f6 !important; color: white !important; transform: translateY(-3px); }
+        .selected-right { background: #10b981 !important; color: white !important; transform: translateY(-3px); }
+        
+        .progress-bar-container {
+            height: 6px;
+            background: #f1f5f9;
+            border-radius: 3px;
+            width: 100%;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+        .progress-fill { height: 100%; width: 0%; background: #ef4444; transition: width 0.1s linear; }
+
+        .feedback-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 5rem;
+            display: none;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .input-name {
+            width: 100%;
+            padding: 0.8rem 1.2rem;
+            border-radius: 14px;
+            border: 2px solid #e2e8f0;
+            font-size: 1rem;
+            margin-bottom: 1.2rem;
+            text-align: center;
+            outline: none;
+        }
+
+        .calibration-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            transition: all 0.3s;
+        }
+        .dot-active { background: #ef4444; transform: scale(1.3); }
+
+        #error-msg {
+            display: none;
+            color: #ef4444;
+            font-size: 0.8rem;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="main-container">
+    <div id="feedback-icon" class="feedback-overlay">✅</div>
+
+    <!-- Video Container -->
+    <div id="video-container" class="video-box-ui">
+        <video id="input-video" playsinline muted autoplay></video>
+    </div>
+
+    <!-- 1. Screen Intro -->
+    <div id="screen-intro" class="screen active-screen">
+        <div class="card">
+            <h1 class="text-4xl font-black text-red-500 mb-1">MARKIMIR</h1>
+            <p class="text-slate-500 mb-3 text-sm font-medium" id="intro-subtitle">Mari mikir sambil miring!</p>
+            
+            <input type="text" id="player-name" class="input-name" placeholder="Siapa namamu?" maxlength="15">
+            <button class="btn-primary" onclick="goToCalibration()">AYO LANJUT!</button>
+            <p id="error-msg">Mohon izinkan kamera untuk bermain.</p>
+        </div>
+    </div>
+
+    <!-- 2. Screen Calibration -->
+    <div id="screen-calibration" class="screen">
+        <div class="card">
+            <h2 class="text-xl font-extrabold mb-1" id="calib-title">Tes Deteksi Kepala</h2>
+            <p class="text-slate-500 mb-4 text-xs italic">Goyangkan kepalamu sedikit</p>
+            
+            <div class="flex justify-between items-center w-full px-8 mb-6">
+                <div id="dot-left" class="calibration-dot"></div>
+                <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sensor Aktif</div>
+                <div id="dot-right" class="calibration-dot"></div>
+            </div>
+            <div id="calib-instruction" class="bg-slate-50 p-3 rounded-xl text-slate-600 text-sm font-bold mb-5 w-full text-center">Miring ke KIRI...</div>
+            <button id="btn-start-quiz" class="btn-primary" disabled onclick="startQuiz()">SIAP BERMAIN!</button>
+        </div>
+    </div>
+
+    <!-- 3. Screen Quiz -->
+    <div id="screen-quiz" class="screen">
+        <div class="w-full max-w-md px-4 flex flex-col items-center">
+            <div class="w-full flex justify-between mb-3">
+                <div class="bg-white px-4 py-1.5 rounded-full font-extrabold shadow-sm text-red-500 text-sm" id="timer">⏳ 60s</div>
+                <div class="bg-white px-4 py-1.5 rounded-full font-extrabold shadow-sm text-blue-500 text-sm" id="score-display">⭐ 0</div>
+            </div>
+
+            <div id="q-box" class="card !max-w-none mb-4 !py-4">
+                <p id="player-greeting" class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-2"></p>
+                <h2 id="question-text" class="text-lg font-extrabold text-slate-800 leading-tight px-2">Memuat...</h2>
+                <div class="progress-bar-container">
+                    <div id="progress-bar" class="progress-fill"></div>
+                </div>
+            </div>
+            <div class="w-full flex gap-3 h-24">
+                <div id="opt-left" class="option-card border-blue-100 text-blue-600">...</div>
+                <div id="opt-right" class="option-card border-green-100 text-green-600">...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. Screen Explanation -->
+    <div id="screen-explain" class="screen">
+        <div class="card !border-blue-400 !py-5">
+            <h3 id="explain-status" class="text-xl font-black mb-1 uppercase">BENAR!</h3>
+            <div class="bg-blue-50 p-3 rounded-xl mb-4 w-full">
+                <p class="text-[10px] font-bold text-blue-500 mb-0.5">JAWABAN:</p>
+                <p id="correct-answer-text" class="text-md font-extrabold text-blue-800"></p>
+            </div>
+            <div class="text-slate-600 text-center mb-6 w-full px-2">
+                <p class="font-bold text-[10px] text-slate-400 uppercase mb-1">INFO PENTING</p>
+                <p id="explain-fact" class="text-xs italic leading-snug"></p>
+            </div>
+            <button class="btn-primary !py-2" onclick="nextQuestion()">LANJUT</button>
+        </div>
+    </div>
+
+    <!-- 5. Screen End -->
+    <div id="screen-end" class="screen">
+        <div class="card">
+            <h2 class="text-2xl font-black mb-1">Selesai!</h2>
+            <p id="end-message" class="text-slate-500 mb-4 text-sm"></p>
+            <div class="text-6xl font-black text-yellow-400 mb-6" id="final-score">0</div>
+            <button class="btn-primary" onclick="location.reload()">MAIN LAGI</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const videoElement = document.getElementById('input-video');
+    const videoContainer = document.getElementById('video-container');
+    const errorMsg = document.getElementById('error-msg');
+    
+    const screens = {
+        intro: document.getElementById('screen-intro'),
+        calibration: document.getElementById('screen-calibration'),
+        quiz: document.getElementById('screen-quiz'),
+        explain: document.getElementById('screen-explain'),
+        end: document.getElementById('screen-end')
+    };
+
+    let playerName = "";
+    let score = 0;
+    let timeLeft = 60;
+    let currentQuestionIndex = 0;
+    let gameActive = false;
+    let showingFeedback = false;
+    let tiltState = "neutral";
+    let selectionTimer = 0;
+    let calibLeftDone = false;
+    let calibRightDone = false;
+
+    const TILT_LIMIT = 0.20; // Sensitivitas lebih tinggi untuk mobile
+    const SELECTION_THRESHOLD = 18; 
+
+    const questions = [
+        { q: "Organ pemompa darah ke seluruh tubuh adalah...", a: "Jantung", b: "Paru-paru", correct: "left", fact: "Jantung berdetak sekitar 100.000 kali setiap hari untuk memompa darah." },
+        { q: "Pembuluh arteri membawa darah yang banyak mengandung...", a: "CO2", b: "Oksigen", correct: "right", fact: "Arteri memiliki dinding yang tebal dan elastis untuk menahan tekanan kuat." },
+        { q: "Bagian jantung yang memompa darah ke seluruh tubuh adalah...", a: "Bilik Kiri", b: "Serambi Kanan", correct: "left", fact: "Bilik kiri memiliki otot paling tebal karena beban kerjanya berat." },
+        { q: "Sel darah yang berfungsi melawan kuman penyakit adalah...", a: "Darah Putih", b: "Darah Merah", correct: "left", fact: "Leukosit atau sel darah putih bertindak sebagai tentara pertahanan tubuh." },
+        { q: "Proses peredaran darah dari jantung ke paru-paru disebut...", a: "Peredaran Kecil", b: "Peredaran Besar", correct: "left", fact: "Peredaran kecil bertujuan menukar CO2 dengan Oksigen di paru-paru." },
+        { q: "Penyakit tekanan darah rendah disebut...", a: "Hipertensi", b: "Hipotensi", correct: "right", fact: "Hipotensi dapat menyebabkan pusing karena otak kurang pasokan oksigen." },
+        { q: "Darah yang kaya oksigen masuk ke jantung melalui...", a: "Serambi Kiri", b: "Bilik Kanan", correct: "left", fact: "Darah bersih dari paru-paru masuk ke serambi kiri terlebih dahulu." },
+        { q: "Penyakit keturunan dimana darah sukar membeku adalah...", a: "Anemia", b: "Hemofilia", correct: "right", fact: "Hemofilia berbahaya karena luka kecil bisa menyebabkan pendarahan lama." }
+    ];
+
+    function showScreen(screenKey) {
+        Object.values(screens).forEach(s => s.classList.remove('active-screen'));
+        screens[screenKey].classList.add('active-screen');
+
+        if (screenKey === 'intro') {
+            videoContainer.className = 'video-box-ui';
+            const subtitle = document.getElementById('intro-subtitle');
+            subtitle.parentNode.insertBefore(videoContainer, subtitle.nextSibling);
+        } else if (screenKey === 'calibration') {
+            videoContainer.className = 'video-large';
+            const title = document.getElementById('calib-title');
+            title.parentNode.insertBefore(videoContainer, title.nextSibling);
+        } else if (screenKey === 'quiz') {
+            videoContainer.className = 'video-box-ui';
+            const quizWrapper = screens.quiz.querySelector('div');
+            quizWrapper.insertBefore(videoContainer, document.getElementById('q-box'));
+        } else if (screenKey === 'explain') {
+            videoContainer.className = 'video-box-ui';
+            const explainCard = screens.explain.querySelector('.card');
+            explainCard.insertBefore(videoContainer, document.getElementById('explain-status').nextSibling);
+        } else {
+            videoContainer.style.display = 'none';
+        }
+    }
+
+    function goToCalibration() {
+        const nameInput = document.getElementById('player-name').value;
+        if (!nameInput) return;
+        playerName = nameInput;
+        showScreen('calibration');
+    }
+
+    function startQuiz() {
+        showScreen('quiz');
+        document.getElementById('player-greeting').innerText = `Siap, ${playerName}?`;
+        gameActive = true;
+        questions.sort(() => Math.random() - 0.5);
+        displayQuestion();
+        
+        const timerInterval = setInterval(() => {
+            if (gameActive) {
+                timeLeft--;
+                document.getElementById('timer').innerText = `⏳ ${timeLeft}s`;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    endGame();
+                }
+            }
+        }, 1000);
+    }
+
+    function displayQuestion() {
+        const q = questions[currentQuestionIndex];
+        document.getElementById('question-text').innerText = q.q;
+        document.getElementById('opt-left').innerText = q.a;
+        document.getElementById('opt-right').innerText = q.b;
+        document.getElementById('progress-bar').style.width = '0%';
+    }
+
+    function processAnswer(choice) {
+        const q = questions[currentQuestionIndex];
+        const icon = document.getElementById('feedback-icon');
+        const isCorrect = choice === q.correct;
+        gameActive = false; 
+        showingFeedback = true;
+
+        if (isCorrect) {
+            score += 10;
+            icon.innerText = "✅";
+        } else {
+            score -= 5;
+            icon.innerText = "❌";
+        }
+        
+        icon.style.display = "block";
+        document.getElementById('score-display').innerText = `⭐ ${score}`;
+
+        setTimeout(() => {
+            icon.style.display = "none";
+            document.getElementById('opt-left').className = "option-card border-blue-100 text-blue-600";
+            document.getElementById('opt-right').className = "option-card border-green-100 text-green-600";
+            showExplanation(isCorrect, q);
+        }, 1000);
+    }
+
+    function showExplanation(isCorrect, q) {
+        const status = document.getElementById('explain-status');
+        status.innerText = isCorrect ? "Benar!" : "Salah!";
+        status.className = isCorrect ? "text-xl font-black mb-1 text-green-500" : "text-xl font-black mb-1 text-red-500";
+        document.getElementById('correct-answer-text').innerText = q.correct === "left" ? q.a : q.b;
+        document.getElementById('explain-fact').innerText = q.fact;
+        showScreen('explain');
+    }
+
+    function nextQuestion() {
+        currentQuestionIndex++;
+        if (currentQuestionIndex >= questions.length) {
+            endGame();
+        } else {
+            showingFeedback = false;
+            gameActive = true;
+            showScreen('quiz');
+            displayQuestion();
+        }
+    }
+
+    const faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+    });
+
+    faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6,
+    });
+
+    faceMesh.onResults(results => {
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            const landmarks = results.multiFaceLandmarks[0];
+            const dy = landmarks[263].y - landmarks[33].y;
+            const dx = landmarks[263].x - landmarks[33].x;
+            const tilt = -(dy / dx); 
+
+            if (tilt > TILT_LIMIT) handleInput("right");
+            else if (tilt < -TILT_LIMIT) handleInput("left");
+            else handleInput("neutral");
+        } else {
+            handleInput("neutral");
+        }
+    });
+
+    function handleInput(state) {
+        if (screens.calibration.classList.contains('active-screen')) {
+            const dotLeft = document.getElementById('dot-left');
+            const dotRight = document.getElementById('dot-right');
+            const instr = document.getElementById('calib-instruction');
+            const btn = document.getElementById('btn-start-quiz');
+
+            dotLeft.className = (state === "left") ? "calibration-dot dot-active" : "calibration-dot";
+            dotRight.className = (state === "right") ? "calibration-dot dot-active" : "calibration-dot";
+
+            if (state === "left") calibLeftDone = true;
+            if (state === "right") calibRightDone = true;
+
+            if (!calibLeftDone) instr.innerText = "Miring ke KIRI...";
+            else if (!calibRightDone) instr.innerText = "Miring ke KANAN...";
+            else {
+                instr.innerText = "Sempurna! Klik Mulai.";
+                btn.disabled = false;
+            }
+            return;
+        }
+
+        if (gameActive && !showingFeedback) {
+            const optLeft = document.getElementById('opt-left');
+            const optRight = document.getElementById('opt-right');
+            const bar = document.getElementById('progress-bar');
+
+            if (state === "left") {
+                optLeft.classList.add('selected-left');
+                optRight.classList.remove('selected-right');
+            } else if (state === "right") {
+                optRight.classList.add('selected-right');
+                optLeft.classList.remove('selected-left');
+            } else {
+                optLeft.classList.remove('selected-left');
+                optRight.classList.remove('selected-right');
+            }
+
+            if (state !== "neutral" && state === tiltState) selectionTimer++;
+            else { selectionTimer = 0; tiltState = state; }
+
+            bar.style.width = `${(selectionTimer / SELECTION_THRESHOLD) * 100}%`;
+
+            if (selectionTimer >= SELECTION_THRESHOLD) {
+                processAnswer(state);
+                selectionTimer = 0;
+            }
+        }
+    }
+
+    function endGame() {
+        gameActive = false;
+        showScreen('end');
+        document.getElementById('final-score').innerText = score;
+        document.getElementById('end-message').innerText = `Hebat, ${playerName}!`;
+    }
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await faceMesh.send({image: videoElement});
+        },
+        width: 480, height: 360
+    });
+
+    // Jalankan Kamera dengan penanganan izin otomatis
+    camera.start().catch(err => {
+        console.error("Camera error:", err);
+        errorMsg.style.display = 'block';
+    });
+
+    window.onload = () => showScreen('intro');
+</script>
+</body>
+</html>
